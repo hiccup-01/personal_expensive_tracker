@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Expense Summary</title>
+    <link rel="stylesheet" href="static/css/style.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+
+    <script>
+        const currentUser = localStorage.getItem('currentUser');
+        if (!currentUser) {
+            window.location.href = 'login.html';
+        }
+    </script>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <div class="header-content">
+                <h1>💰 Personal Expense Tracker</h1>
+                <div class="user-info">
+                    <span id="welcomeMsg">Welcome!</span>
+                    <a href="login.html" class="btn-logout" onclick="logout()">Logout</a>
+                </div>
+            </div>
+            <nav>
+                <a href="index.html" class="nav-link">Add Expense</a>
+                <a href="summary.html" class="nav-link active">View Summary</a>
+            </nav>
+        </header>
+
+        <section class="charts-section">
+            <h2>📊 Visual Analytics</h2>
+            <div class="charts-grid">
+                <div class="chart-container">
+                    <h3>Expenses by Category</h3>
+                    <canvas id="categoryChart"></canvas>
+                </div>
+                <div class="chart-container">
+                    <h3>Monthly Trend</h3>
+                    <canvas id="monthlyChart"></canvas>
+                </div>
+            </div>
+        </section>
+
+        <section class="summary-section">
+            <h2>📅 Monthly Summary</h2>
+            <div class="summary-grid" id="monthlySummary">
+                <p class="loading">Loading monthly summary...</p>
+            </div>
+        </section>
+
+        <section class="summary-section">
+            <h2>📋 Category Breakdown</h2>
+            <div class="table-wrapper">
+                <table id="categoryTable">
+                    <thead>
+                        <tr>
+                            <th>Category</th>
+                            <th>Number of Expenses</th>
+                            <th>Total Amount</th>
+                            <th>Percentage</th>
+                        </tr>
+                    </thead>
+                    <tbody id="categoryTableBody">
+                        <tr><td colspan="4" class="loading">Loading...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+            <div class="total-display">
+                <strong>Grand Total: </strong>
+                <span id="grandTotal">₹0.00</span>
+            </div>
+        </section>
+    </div>
+
+    <script src="static/js/script.js"></script>
+    <script>
+        // Set Username
+        document.getElementById('welcomeMsg').textContent = "Welcome, " + currentUser + "!";
+        
+        function logout() {
+            localStorage.removeItem('currentUser');
+        }
+
+        // --- DASHBOARD LOGIC ---
+        window.onload = function() {
+            refreshDashboard();
+        };
+
+        function refreshDashboard() {
+            const expenses = JSON.parse(localStorage.getItem('expenses') || '[]');
+            
+            if (expenses.length === 0) {
+                document.getElementById('monthlySummary').innerHTML = '<p class="loading">No expenses found.</p>';
+                document.getElementById('categoryTableBody').innerHTML = '<tr><td colspan="4">No data yet.</td></tr>';
+                return;
+            }
+
+            const categoryData = processCategoryData(expenses);
+            const monthlyData = processMonthlyData(expenses);
+            updateCharts(categoryData, monthlyData);
+            renderMonthlyGrid(monthlyData);
+            renderCategoryTable(categoryData, expenses);
+        }
+
+        function processCategoryData(expenses) {
+            const summary = {};
+            expenses.forEach(exp => {
+                if (!summary[exp.category]) summary[exp.category] = { total: 0, count: 0 };
+                summary[exp.category].total += parseFloat(exp.amount);
+                summary[exp.category].count += 1;
+            });
+            return summary;
+        }
+
+        function processMonthlyData(expenses) {
+            const summary = {};
+            expenses.forEach(exp => {
+                const monthKey = exp.date.substring(0, 7); 
+                if (!summary[monthKey]) summary[monthKey] = 0;
+                summary[monthKey] += parseFloat(exp.amount);
+            });
+            return summary;
+        }
+
+        function updateCharts(catData, monthData) {
+            const ctxCat = document.getElementById('categoryChart');
+            const ctxMonth = document.getElementById('monthlyChart');
+
+            if (window.catChart) window.catChart.destroy();
+            window.catChart = new Chart(ctxCat, {
+                type: 'bar',
+                data: {
+                    labels: Object.keys(catData),
+                    datasets: [{
+                        label: 'Total Spent',
+                        data: Object.values(catData).map(d => d.total),
+                        backgroundColor: 'rgba(102, 126, 234, 0.6)'
+                    }]
+                },
+                options: { responsive: true }
+            });
+
+            if (window.monthChart) window.monthChart.destroy();
+            const sortedMonths = Object.keys(monthData).sort();
+            window.monthChart = new Chart(ctxMonth, {
+                type: 'line',
+                data: {
+                    labels: sortedMonths,
+                    datasets: [{
+                        label: 'Monthly Trend',
+                        data: sortedMonths.map(m => monthData[m]),
+                        borderColor: 'rgba(237, 100, 166, 1)',
+                        fill: true
+                    }]
+                },
+                options: { responsive: true }
+            });
+        }
+
+        function renderMonthlyGrid(monthData) {
+            const container = document.getElementById('monthlySummary');
+            let html = '';
+            Object.keys(monthData).sort().forEach(month => {
+                const dateObj = new Date(month + '-01');
+                const monthName = dateObj.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+                html += `<div class="summary-card"><h3>${monthName}</h3><div class="amount">₹${monthData[month].toFixed(2)}</div></div>`;
+            });
+            container.innerHTML = html;
+        }
+
+        function renderCategoryTable(catData, expenses) {
+            const tbody = document.getElementById('categoryTableBody');
+            const totalEl = document.getElementById('grandTotal');
+            let totalAmount = expenses.reduce((sum, item) => sum + parseFloat(item.amount), 0);
+            totalEl.textContent = '₹' + totalAmount.toFixed(2);
+            let html = '';
+            for (const [category, data] of Object.entries(catData)) {
+                const percent = ((data.total / totalAmount) * 100).toFixed(1);
+                html += `<tr><td>${category}</td><td>${data.count}</td><td>₹${data.total.toFixed(2)}</td><td>${percent}%</td></tr>`;
+            }
+            tbody.innerHTML = html;
+        }
+    </script>
+</body>
+</html>

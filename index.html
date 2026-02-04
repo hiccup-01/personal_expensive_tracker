@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Personal Expense Tracker</title>
+    <link rel="stylesheet" href="static/css/style.css">
+    
+    <script>
+        const currentUser = localStorage.getItem('currentUser');
+        if (!currentUser) {
+            window.location.href = 'login.html';
+        }
+    </script>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <div class="header-content">
+                <h1>💰 Personal Expense Tracker</h1>
+                <div class="user-info">
+                    <span id="welcomeMsg">Welcome!</span>
+                    <a href="login.html" class="btn-logout" onclick="logout()">Logout</a>
+                </div>
+            </div>
+            <nav>
+                <a href="index.html" class="nav-link active">Add Expense</a>
+                <a href="summary.html" class="nav-link">View Summary</a>
+            </nav>
+        </header>
+
+        <section class="form-section">
+            <h2>Add New Expense</h2>
+            <form id="expenseForm">
+                <div class="form-group">
+                    <label for="date">Date:</label>
+                    <input type="date" id="date" name="date" required>
+                </div>
+
+                <div class="form-group">
+                    <label for="category">Category:</label>
+                    <select id="category" name="category" required>
+                        <option value="">Select Category</option>
+                        <option value="Food">Food</option>
+                        <option value="Transportation">Transportation</option>
+                        <option value="Entertainment">Entertainment</option>
+                        <option value="Shopping">Shopping</option>
+                        <option value="Bills">Bills</option>
+                        <option value="Healthcare">Healthcare</option>
+                        <option value="Education">Education</option>
+                        <option value="Other">Other</option>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label for="description">Description:</label>
+                    <input type="text" id="description" name="description" placeholder="e.g., Lunch at restaurant" required>
+                </div>
+
+                <div class="form-group">
+                    <label for="amount">Amount (₹):</label>
+                    <input type="number" id="amount" name="amount" step="0.01" min="0.01" placeholder="0.00" required>
+                </div>
+
+                <button type="submit" class="btn-primary">Add Expense</button>
+            </form>
+            
+            <div id="message" class="message"></div>
+        </section>
+
+        <section class="table-section">
+            <h2>Recent Expenses</h2>
+            <div class="table-controls">
+                <button onclick="loadExpenses()" class="btn-secondary">Refresh</button>
+            </div>
+            <div class="table-wrapper">
+                <table id="expenseTable">
+                    <thead>
+                        <tr>
+                            <th>Date</th>
+                            <th>Category</th>
+                            <th>Description</th>
+                            <th>Amount</th>
+                            <th>Action</th>
+                        </tr>
+                    </thead>
+                    <tbody id="expenseTableBody">
+                        <tr><td colspan="5" class="loading">Loading...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+            <div class="total-display">
+                <strong>Total Expenses: </strong>
+                <span id="totalExpenses">₹0.00</span>
+            </div>
+        </section>
+    </div>
+
+    <!-- Firebase SDK -->
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-database-compat.js"></script>
+    
+    <!-- Firebase Config -->
+    <script src="static/js/firebase-config.js"></script>
+
+    <script>
+        // Set Username
+        document.getElementById('welcomeMsg').textContent = "Welcome, " + currentUser + "!";
+
+        function logout() {
+            localStorage.removeItem('currentUser');
+            localStorage.removeItem('userEmail');
+        }
+
+        // Set today's date
+        const dateInput = document.getElementById('date');
+        const today = new Date().toISOString().split('T')[0];
+        dateInput.value = today;
+
+        // Format currency
+        function formatCurrency(amount) {
+            return `₹${parseFloat(amount).toFixed(2)}`;
+        }
+
+        // Display message
+        function showMessage(message, type = 'success') {
+            const messageDiv = document.getElementById('message');
+            if (messageDiv) {
+                messageDiv.textContent = message;
+                messageDiv.className = `message ${type}`;
+                messageDiv.style.display = 'block';
+                
+                setTimeout(() => {
+                    messageDiv.style.display = 'none';
+                }, 3000);
+            }
+        }
+
+        // Add Expense
+        const expenseForm = document.getElementById('expenseForm');
+        expenseForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const expenseData = {
+                date: document.getElementById('date').value,
+                category: document.getElementById('category').value,
+                description: document.getElementById('description').value,
+                amount: parseFloat(document.getElementById('amount').value)
+            };
+
+            const submitBtn = expenseForm.querySelector('button[type="submit"]');
+            const originalText = submitBtn.textContent;
+            submitBtn.textContent = 'Adding...';
+            submitBtn.disabled = true;
+
+            try {
+                const result = await addExpense(currentUser, expenseData);
+                
+                if (result.success) {
+                    showMessage('Expense added successfully!', 'success');
+                    expenseForm.reset();
+                    dateInput.value = today;
+                } else {
+                    showMessage(result.error || 'Failed to add expense', 'error');
+                }
+            } catch (error) {
+                console.error('Add expense error:', error);
+                showMessage('Failed to add expense. Check your connection.', 'error');
+            } finally {
+                submitBtn.textContent = originalText;
+                submitBtn.disabled = false;
+            }
+        });
+
+        // Load Expenses
+        function loadExpenses() {
+            const tableBody = document.getElementById('expenseTableBody');
+            const totalElement = document.getElementById('totalExpenses');
+            
+            // Listen to real-time updates
+            listenToExpenses(currentUser, (expenses) => {
+                // Update Total
+                const total = expenses.reduce((sum, item) => sum + item.amount, 0);
+                if (totalElement) totalElement.textContent = formatCurrency(total);
+
+                // Update Table
+                if (expenses.length === 0) {
+                    tableBody.innerHTML = '<tr><td colspan="5" class="loading">No expenses yet. Add one above!</td></tr>';
+                    return;
+                }
+
+                let html = '';
+                expenses.forEach(expense => {
+                    html += `
+                        <tr>
+                            <td>${expense.date}</td>
+                            <td>${expense.category}</td>
+                            <td>${expense.description}</td>
+                            <td>${formatCurrency(expense.amount)}</td>
+                            <td>
+                                <button class="btn-delete" onclick="deleteExpenseItem('${expense.id}')">Delete</button>
+                            </td>
+                        </tr>
+                    `;
+                });
+                
+                tableBody.innerHTML = html;
+            });
+        }
+
+        // Delete Expense
+        async function deleteExpenseItem(expenseId) {
+            if (!confirm('Delete this expense?')) return;
+
+            try {
+                const result = await deleteExpense(currentUser, expenseId);
+                
+                if (result.success) {
+                    showMessage('Expense deleted successfully!', 'success');
+                } else {
+                    showMessage(result.error || 'Failed to delete expense', 'error');
+                }
+            } catch (error) {
+                console.error('Delete expense error:', error);
+                showMessage('Failed to delete expense. Check your connection.', 'error');
+            }
+        }
+
+        // Load expenses on page load
+        loadExpenses();
+    </script>
+</body>
+</html>
