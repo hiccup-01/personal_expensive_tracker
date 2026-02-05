@@ -13,6 +13,40 @@
             window.location.href = 'login.html';
         }
     </script>
+    
+    <style>
+        /* Income vs Expenses Overview */
+        .income-overview {
+            background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%);
+            color: white;
+            padding: 25px;
+            border-radius: 12px;
+            margin-bottom: 30px;
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 20px;
+        }
+        
+        .income-stat {
+            text-align: center;
+        }
+        
+        .income-stat h3 {
+            font-size: 14px;
+            opacity: 0.9;
+            margin-bottom: 8px;
+            font-weight: 500;
+        }
+        
+        .income-stat .value {
+            font-size: 32px;
+            font-weight: bold;
+        }
+        
+        .income-stat .value.negative {
+            color: #ff6b6b;
+        }
+    </style>
 </head>
 <body>
     <div class="container">
@@ -30,6 +64,22 @@
             </nav>
         </header>
 
+        <!-- Income vs Expenses Overview -->
+        <section class="income-overview">
+            <div class="income-stat">
+                <h3>Current Month Income</h3>
+                <div class="value" id="currentIncome">₹0.00</div>
+            </div>
+            <div class="income-stat">
+                <h3>Current Month Expenses</h3>
+                <div class="value" id="currentExpenses">₹0.00</div>
+            </div>
+            <div class="income-stat">
+                <h3>Balance</h3>
+                <div class="value" id="currentBalance">₹0.00</div>
+            </div>
+        </section>
+
         <section class="charts-section">
             <h2>📊 Visual Analytics</h2>
             <div class="charts-grid">
@@ -38,7 +88,7 @@
                     <canvas id="categoryChart"></canvas>
                 </div>
                 <div class="chart-container">
-                    <h3>Monthly Trend</h3>
+                    <h3>Income vs Expenses Trend</h3>
                     <canvas id="monthlyChart"></canvas>
                 </div>
             </div>
@@ -91,15 +141,43 @@
             localStorage.removeItem('userEmail');
         }
 
+        // Get current month
+        const now = new Date();
+        const currentMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+
         // --- DASHBOARD LOGIC WITH FIREBASE ---
         window.onload = function() {
+            loadCurrentMonthOverview();
             refreshDashboard();
         };
+
+        async function loadCurrentMonthOverview() {
+            try {
+                const balanceData = await getMonthlyBalance(currentUser, currentMonth);
+                
+                document.getElementById('currentIncome').textContent = `₹${balanceData.income.toFixed(2)}`;
+                document.getElementById('currentExpenses').textContent = `₹${balanceData.expenses.toFixed(2)}`;
+                
+                const balanceEl = document.getElementById('currentBalance');
+                balanceEl.textContent = `₹${balanceData.balance.toFixed(2)}`;
+                
+                if (balanceData.balance < 0) {
+                    balanceEl.classList.add('negative');
+                } else {
+                    balanceEl.classList.remove('negative');
+                }
+            } catch (error) {
+                console.error('Error loading current month overview:', error);
+            }
+        }
 
         async function refreshDashboard() {
             try {
                 // Get expenses from Firebase
                 const expenses = await getUserExpenses(currentUser);
+                
+                // Get all income data
+                const allIncome = await getAllIncome(currentUser);
                 
                 if (expenses.length === 0) {
                     document.getElementById('monthlySummary').innerHTML = '<p class="loading">No expenses found. Add some expenses first!</p>';
@@ -108,7 +186,7 @@
                 }
 
                 const categoryData = processCategoryData(expenses);
-                const monthlyData = processMonthlyData(expenses);
+                const monthlyData = await processMonthlyDataWithIncome(expenses, allIncome);
                 updateCharts(categoryData, monthlyData);
                 renderMonthlyGrid(monthlyData);
                 renderCategoryTable(categoryData, expenses);
@@ -128,13 +206,22 @@
             return summary;
         }
 
-        function processMonthlyData(expenses) {
+        async function processMonthlyDataWithIncome(expenses, incomeData) {
             const summary = {};
+            
+            // Process expenses
             expenses.forEach(exp => {
                 const monthKey = exp.date.substring(0, 7); 
-                if (!summary[monthKey]) summary[monthKey] = 0;
-                summary[monthKey] += parseFloat(exp.amount);
+                if (!summary[monthKey]) summary[monthKey] = { expenses: 0, income: 0 };
+                summary[monthKey].expenses += parseFloat(exp.amount);
             });
+            
+            // Add income data
+            incomeData.forEach(inc => {
+                if (!summary[inc.month]) summary[inc.month] = { expenses: 0, income: 0 };
+                summary[inc.month].income = inc.amount;
+            });
+            
             return summary;
         }
 
@@ -142,6 +229,7 @@
             const ctxCat = document.getElementById('categoryChart');
             const ctxMonth = document.getElementById('monthlyChart');
 
+            // Category Chart
             if (window.catChart) window.catChart.destroy();
             window.catChart = new Chart(ctxCat, {
                 type: 'bar',
@@ -159,19 +247,29 @@
                 }
             });
 
+            // Income vs Expenses Chart
             if (window.monthChart) window.monthChart.destroy();
             const sortedMonths = Object.keys(monthData).sort();
             window.monthChart = new Chart(ctxMonth, {
                 type: 'line',
                 data: {
                     labels: sortedMonths,
-                    datasets: [{
-                        label: 'Monthly Trend',
-                        data: sortedMonths.map(m => monthData[m]),
-                        borderColor: 'rgba(237, 100, 166, 1)',
-                        backgroundColor: 'rgba(237, 100, 166, 0.1)',
-                        fill: true
-                    }]
+                    datasets: [
+                        {
+                            label: 'Income',
+                            data: sortedMonths.map(m => monthData[m].income || 0),
+                            borderColor: 'rgba(81, 207, 102, 1)',
+                            backgroundColor: 'rgba(81, 207, 102, 0.1)',
+                            fill: true
+                        },
+                        {
+                            label: 'Expenses',
+                            data: sortedMonths.map(m => monthData[m].expenses || 0),
+                            borderColor: 'rgba(237, 100, 166, 1)',
+                            backgroundColor: 'rgba(237, 100, 166, 0.1)',
+                            fill: true
+                        }
+                    ]
                 },
                 options: { 
                     responsive: true,
@@ -186,7 +284,18 @@
             Object.keys(monthData).sort().forEach(month => {
                 const dateObj = new Date(month + '-01');
                 const monthName = dateObj.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
-                html += `<div class="summary-card"><h3>${monthName}</h3><div class="amount">₹${monthData[month].toFixed(2)}</div></div>`;
+                const data = monthData[month];
+                const balance = (data.income || 0) - (data.expenses || 0);
+                const balanceClass = balance < 0 ? 'negative' : 'positive';
+                
+                html += `
+                    <div class="summary-card">
+                        <h3>${monthName}</h3>
+                        <div class="amount">Income: ₹${(data.income || 0).toFixed(2)}</div>
+                        <div class="amount">Expenses: ₹${(data.expenses || 0).toFixed(2)}</div>
+                        <div class="amount ${balanceClass}">Balance: ₹${balance.toFixed(2)}</div>
+                    </div>
+                `;
             });
             container.innerHTML = html;
         }
