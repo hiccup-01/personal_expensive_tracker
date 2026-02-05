@@ -89,6 +89,74 @@ async function loginUser(username, password) {
     }
 }
 
+// ==================== MONTHLY INCOME FUNCTIONS ====================
+
+// Set monthly income for user
+async function setMonthlyIncome(username, amount, month) {
+    try {
+        // month format: "2025-02" (YYYY-MM)
+        if (!month) {
+            const now = new Date();
+            month = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+        }
+        
+        await database.ref('income/' + username + '/' + month).set({
+            amount: parseFloat(amount),
+            updatedAt: new Date().toISOString()
+        });
+        
+        return { success: true, message: 'Monthly income set successfully!' };
+    } catch (error) {
+        console.error('Set income error:', error);
+        return { success: false, error: 'Failed to set income.' };
+    }
+}
+
+// Get monthly income for user
+async function getMonthlyIncome(username, month) {
+    try {
+        // month format: "2025-02" (YYYY-MM)
+        if (!month) {
+            const now = new Date();
+            month = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+        }
+        
+        const snapshot = await database.ref('income/' + username + '/' + month).once('value');
+        
+        if (snapshot.exists()) {
+            return snapshot.val().amount;
+        }
+        
+        return 0; // No income set for this month
+    } catch (error) {
+        console.error('Get income error:', error);
+        return 0;
+    }
+}
+
+// Get all income records for user
+async function getAllIncome(username) {
+    try {
+        const snapshot = await database.ref('income/' + username).once('value');
+        const incomeData = [];
+        
+        snapshot.forEach((child) => {
+            incomeData.push({
+                month: child.key,
+                amount: child.val().amount,
+                updatedAt: child.val().updatedAt
+            });
+        });
+
+        return incomeData;
+    } catch (error) {
+        console.error('Get all income error:', error);
+        return [];
+    }
+}
+
+// ==================== EXPENSE FUNCTIONS ====================
+
 // Add expense for user
 async function addExpense(username, expenseData) {
     try {
@@ -125,6 +193,62 @@ async function getUserExpenses(username) {
     }
 }
 
+// Get expenses for specific month
+async function getMonthlyExpenses(username, month) {
+    try {
+        // month format: "2025-02" (YYYY-MM)
+        if (!month) {
+            const now = new Date();
+            month = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+        }
+        
+        const allExpenses = await getUserExpenses(username);
+        const monthlyExpenses = allExpenses.filter(expense => 
+            expense.date.startsWith(month)
+        );
+        
+        return monthlyExpenses;
+    } catch (error) {
+        console.error('Get monthly expenses error:', error);
+        return [];
+    }
+}
+
+// Calculate total expenses for a month
+async function calculateMonthlyExpenses(username, month) {
+    try {
+        const monthlyExpenses = await getMonthlyExpenses(username, month);
+        const total = monthlyExpenses.reduce((sum, expense) => sum + parseFloat(expense.amount), 0);
+        return total;
+    } catch (error) {
+        console.error('Calculate monthly expenses error:', error);
+        return 0;
+    }
+}
+
+// Get monthly balance (Income - Expenses)
+async function getMonthlyBalance(username, month) {
+    try {
+        if (!month) {
+            const now = new Date();
+            month = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+        }
+        
+        const income = await getMonthlyIncome(username, month);
+        const expenses = await calculateMonthlyExpenses(username, month);
+        
+        return {
+            income: income,
+            expenses: expenses,
+            balance: income - expenses,
+            percentage: income > 0 ? ((expenses / income) * 100).toFixed(1) : 0
+        };
+    } catch (error) {
+        console.error('Get monthly balance error:', error);
+        return { income: 0, expenses: 0, balance: 0, percentage: 0 };
+    }
+}
+
 // Delete expense
 async function deleteExpense(username, expenseId) {
     try {
@@ -146,5 +270,22 @@ function listenToExpenses(username, callback) {
         });
         expenses.sort((a, b) => new Date(b.date) - new Date(a.date));
         callback(expenses);
+    });
+}
+
+// Listen to income changes in real-time
+function listenToIncome(username, month, callback) {
+    if (!month) {
+        const now = new Date();
+        month = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+    }
+    
+    const incomeRef = database.ref('income/' + username + '/' + month);
+    incomeRef.on('value', (snapshot) => {
+        if (snapshot.exists()) {
+            callback(snapshot.val().amount);
+        } else {
+            callback(0);
+        }
     });
 }
