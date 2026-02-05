@@ -75,34 +75,47 @@
         </section>
     </div>
 
-    <script src="static/js/script.js"></script>
+    <!-- Firebase SDK -->
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-database-compat.js"></script>
+    
+    <!-- Firebase Config -->
+    <script src="static/js/firebase-config.js"></script>
+
     <script>
         // Set Username
         document.getElementById('welcomeMsg').textContent = "Welcome, " + currentUser + "!";
         
         function logout() {
             localStorage.removeItem('currentUser');
+            localStorage.removeItem('userEmail');
         }
 
-        // --- DASHBOARD LOGIC ---
+        // --- DASHBOARD LOGIC WITH FIREBASE ---
         window.onload = function() {
             refreshDashboard();
         };
 
-        function refreshDashboard() {
-            const expenses = JSON.parse(localStorage.getItem('expenses') || '[]');
-            
-            if (expenses.length === 0) {
-                document.getElementById('monthlySummary').innerHTML = '<p class="loading">No expenses found.</p>';
-                document.getElementById('categoryTableBody').innerHTML = '<tr><td colspan="4">No data yet.</td></tr>';
-                return;
-            }
+        async function refreshDashboard() {
+            try {
+                // Get expenses from Firebase
+                const expenses = await getUserExpenses(currentUser);
+                
+                if (expenses.length === 0) {
+                    document.getElementById('monthlySummary').innerHTML = '<p class="loading">No expenses found. Add some expenses first!</p>';
+                    document.getElementById('categoryTableBody').innerHTML = '<tr><td colspan="4">No data yet.</td></tr>';
+                    return;
+                }
 
-            const categoryData = processCategoryData(expenses);
-            const monthlyData = processMonthlyData(expenses);
-            updateCharts(categoryData, monthlyData);
-            renderMonthlyGrid(monthlyData);
-            renderCategoryTable(categoryData, expenses);
+                const categoryData = processCategoryData(expenses);
+                const monthlyData = processMonthlyData(expenses);
+                updateCharts(categoryData, monthlyData);
+                renderMonthlyGrid(monthlyData);
+                renderCategoryTable(categoryData, expenses);
+            } catch (error) {
+                console.error('Error loading dashboard:', error);
+                document.getElementById('monthlySummary').innerHTML = '<p class="loading">Error loading data. Please refresh the page.</p>';
+            }
         }
 
         function processCategoryData(expenses) {
@@ -140,7 +153,10 @@
                         backgroundColor: 'rgba(102, 126, 234, 0.6)'
                     }]
                 },
-                options: { responsive: true }
+                options: { 
+                    responsive: true,
+                    maintainAspectRatio: true
+                }
             });
 
             if (window.monthChart) window.monthChart.destroy();
@@ -153,10 +169,14 @@
                         label: 'Monthly Trend',
                         data: sortedMonths.map(m => monthData[m]),
                         borderColor: 'rgba(237, 100, 166, 1)',
+                        backgroundColor: 'rgba(237, 100, 166, 0.1)',
                         fill: true
                     }]
                 },
-                options: { responsive: true }
+                options: { 
+                    responsive: true,
+                    maintainAspectRatio: true
+                }
             });
         }
 
